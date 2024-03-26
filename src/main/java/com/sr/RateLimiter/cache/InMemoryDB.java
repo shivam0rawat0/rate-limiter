@@ -1,13 +1,18 @@
 package com.sr.RateLimiter.cache;
 
+import com.sr.RateLimiter.constant.Constant;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.time.*;
 import java.util.Set;
 
+@Component
 public class InMemoryDB {
-    private Map<String, Integer> ipmap;
+    private Map<String, Integer> ipMap;
     private Set<String> blockedIp;
     private String[] requests;
     private long[] timeStamp;
@@ -15,42 +20,42 @@ public class InMemoryDB {
     private int windowSize;
     private int maxCount;
     private boolean cacheLock;
-    private int lastBlock;
-    public InMemoryDB(int requestSize, int maxCount) {
-        ipmap = new HashMap<>();
+
+    public InMemoryDB() {
+        windowSize = Constant.MAX_REQUESTS_PER_WINDOW;
+        maxCount = Constant.MAX_REQUESTS_PER_IP;
+        ipMap = new HashMap<>();
         blockedIp = new HashSet<>();
-        windowSize = requestSize;
-        requests = new String[requestSize];
-        timeStamp = new long[requestSize];
+        requests = new String[windowSize];
+        timeStamp = new long[windowSize];
         index = -1;
-        this.maxCount = maxCount;
         // to clean the request window
         releaseLock();
         new Thread(new rollOver()).start();
     }
 
-    private synchronized void getLock(){
+    private synchronized void getLock() {
         try {
-            while (cacheLock) Thread.sleep(10);
+            while (cacheLock) Thread.sleep(Constant.THREAD_WAIT);
             cacheLock = true;
-        } catch (Exception e){
+        } catch (Exception e) {
             cacheLock = false;
         }
     }
 
-    private synchronized void releaseLock(){
+    private synchronized void releaseLock() {
         cacheLock = false;
     }
 
     public boolean isValid(String ip) {
         try {
             getLock();
-            if (!blockedIp.contains(ip) && (index + 1)< windowSize) {
-                int count = ipmap.containsKey(ip) ? ipmap.get(ip) : 0;
-                if ((count + 1)< maxCount) {
+            if (!blockedIp.contains(ip) && (index + 1) < windowSize) {
+                int count = ipMap.containsKey(ip) ? ipMap.get(ip) : 0;
+                if ((count + 1) < maxCount) {
                     ++index;
                     ++count;
-                    ipmap.put(ip, count);
+                    ipMap.put(ip, count);
                     requests[index] = ip;
                     timeStamp[index] = Instant.now().getEpochSecond();
                     releaseLock();
@@ -61,7 +66,7 @@ public class InMemoryDB {
             }
             releaseLock();
             return false;
-        } catch (Exception e){
+        } catch (Exception e) {
             releaseLock();
         }
         return false;
@@ -70,34 +75,38 @@ public class InMemoryDB {
     private class rollOver implements Runnable {
         @Override
         public void run() {
-            lastBlock = 0;
-            while (true) {
-                try {
+            try {
+                boolean isProcessed;
+                int currentBlock = 0;
+                int lastBlock = 0;
+                long NOW = 0L;
+                while (true) {
                     getLock();
-                    int curr;
-                    boolean isProcessed = false;
-                    long NOW = Instant.now().getEpochSecond();
-                    for (curr = lastBlock; curr <= index; curr++) {
-                        if (timeStamp[curr] < NOW) {
+                    isProcessed = false;
+                    NOW = Instant.now().getEpochSecond();
+                    for (currentBlock = lastBlock; currentBlock <= index; currentBlock++) {
+                        if (timeStamp[currentBlock] < NOW) {
                             isProcessed = true;
-                            String ip = requests[curr];
-                            int count = ipmap.get(ip) - 1;
-                            count = (count <= 0)?0:count;
-                            ipmap.put(ip, count);
+                            String ip = requests[currentBlock];
+                            int count = ipMap.get(ip) - 1;
+                            count = (count <= 0) ? 0 : count;
+                            ipMap.put(ip, count);
                         } else break;
                     }
                     if (isProcessed) {
-                        if( (curr >index) || (index == windowSize - 1)) {
+                        if ((currentBlock > index) || (index == windowSize - 1)) {
                             index = -1;
                             lastBlock = 0;
-                        } else lastBlock = curr + 1;
+                        } else {
+                            lastBlock = currentBlock + 1;
+                        }
                     }
                     releaseLock();
-                    Thread.sleep(500);
-                } catch (InterruptedException e) {
-                    releaseLock();
-                    e.printStackTrace();
+                    Thread.sleep(Constant.IP_PROCESS_WAIT);
                 }
+            } catch (InterruptedException e) {
+                releaseLock();
+                e.printStackTrace();
             }
         }
     }

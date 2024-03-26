@@ -2,6 +2,7 @@ package com.sr.RateLimiter.controller;
 
 import com.sr.RateLimiter.cache.InMemoryDB;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -9,7 +10,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/gateway")
 public class RateLimitController {
-    InMemoryDB cache = new InMemoryDB(100,10);
+
+    @Autowired
+    InMemoryDB cache;
+
     @GetMapping("/")
     public String GET(HttpServletRequest request){
         String ip = request.getHeader("X-FORWARDED-FOR");
